@@ -72,6 +72,16 @@
     background:var(--paper-2); border:1px solid var(--line);
     color:var(--ink); padding:6px 8px; border-radius:2px;
   }
+  .custom-input{ width:130px; }
+
+  @media (max-width: 480px){
+    .dpi-row{
+      flex-direction:column; align-items:stretch; gap:4px;
+    }
+    .row-label{ width:auto; }
+    .dpi-row select,
+    .dpi-row .custom-input{ width:100%; }
+  }
 
   .queue{ margin-top:22px; display:flex; flex-direction:column; gap:10px; }
   .item{
@@ -121,10 +131,10 @@
         <option value="600">600 DPI</option>
         <option value="custom-dpi">Input manual (DPI)</option>
       </select>
-      <input type="number" id="customPxInput" placeholder="Lebar px, mis. 2480"
-        min="500" max="12000" style="display:none;width:130px;">
-      <input type="number" id="customDpiInput" placeholder="DPI, mis. 300"
-        min="72" max="1450" style="display:none;width:110px;">
+      <input type="number" id="customPxInput" class="custom-input" placeholder="Lebar px, mis. 2480"
+        min="500" max="12000" style="display:none;">
+      <input type="number" id="customDpiInput" class="custom-input" placeholder="DPI, mis. 300"
+        min="72" max="1450" style="display:none;">
     </div>
 
     <div class="dpi-row">
