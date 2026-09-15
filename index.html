@@ -61,7 +61,11 @@
 
   .dpi-row{
     display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    margin-top:18px; font-size:11px; color:var(--ink-soft);
+    margin-top:10px; font-size:11px; color:var(--ink-soft);
+  }
+  .dpi-row:first-of-type{ margin-top:18px; }
+  .row-label{
+    display:inline-block; width:60px; flex-shrink:0;
   }
   select{
     font-family:inherit; font-size:11px;
@@ -107,7 +111,7 @@
     </div>
 
     <div class="dpi-row">
-      <span>Resolusi:</span>
+      <span class="row-label">Resolusi:</span>
       <select id="dpiSelect">
         <option value="px2800" selected>2800 px — rekomendasi PDF 2 halaman</option>
         <option value="px2000">2000 px — rekomendasi PDF 3 halaman</option>
@@ -120,17 +124,21 @@
       <input type="number" id="customPxInput" placeholder="Lebar px, mis. 2480"
         min="500" max="12000" style="display:none;width:130px;">
       <input type="number" id="customDpiInput" placeholder="DPI, mis. 300"
-        min="72" max="1450" style="display:none;width:110px;"></div>
+        min="72" max="1450" style="display:none;width:110px;">
+    </div>
 
-      <div <span>Mode:</span>
+    <div class="dpi-row">
+      <span class="row-label">Mode:</span>
       <select id="ratioSelect">
-        <option value="a4" selected>A4 (rasio jadi A4 1 halaman)</option>
-        <option value="a4-nofoto">A4 tanpa foto (potong Foto otomatis)</option>
-        <option value="bebas">Bebas (rasio sesuai file yg diupload)</option>
-      </select></div>
+        <option value="a4" selected>A4 (Rasio akhir akan jadi A4 1 halaman)</option>
+        <option value="a4-nofoto">A4 tanpa foto (potong foto otomatis)</option>
+        <option value="bebas">Bebas (Rasio sesuai file yang diupload)</option>
+      </select>
+    </div>
 
-      <div <button class="btn" id="clearBtn" type="button" style="padding:6px 10px;">Bersihkan</button>
-    </div></div>
+    <div class="dpi-row">
+      <button class="btn" id="clearBtn" type="button" style="padding:6px 10px;">Bersihkan</button>
+    </div>
 
     <div class="queue" id="queue"></div>
   </div>
