@@ -27,7 +27,7 @@
     justify-content:center;
     padding: 40px 20px 60px;
   }
-  .sheet{ width:700%; max-width:700px; }
+  .sheet{ width:100%; max-width:560px; }
   h1{
     font-family: Georgia, "Times New Roman", serif;
     font-size:26px;
@@ -97,13 +97,13 @@
 </head>
 <body>
   <div class="sheet">
-    <h1>Satukan PDF,<br>Jangan lupa sarapan.</h1>
+    <h1>Satukan PDF, hilangkan<br>spasi kosong.</h1>
 
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="Pilih atau taruh file PDF">
       <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none">
       <div class="drop-icon"><span class="page"></span><span class="page"></span></div>
       <div class="drop-title">Taruh file PDF di sini, atau klik untuk pilih</div>
-      <div class="drop-sub">banyak file sekaligus? Oke lagi!</div>
+      <div class="drop-sub">Bisa banyak file sekaligus</div>
     </div>
 
     <div class="dpi-row">
@@ -124,11 +124,12 @@
 
       <span>Mode:</span>
       <select id="ratioSelect">
-        <option value="a4" selected>A4 (rasio jadi A4 1 halaman)</option>
-        <option value="bebas">Bebas (rasio sesuai file yang diupload)</option>
+        <option value="a4" selected>A4 (rasio tetap)</option>
+        <option value="a4-nofoto">A4 tanpa foto (potong bagian Lampiran)</option>
+        <option value="bebas">Bebas (rasio asli)</option>
       </select>
 
-      <button class="btn" id="clearBtn" type="button" style="padding:6px 10px;">Clear</button>
+      <button class="btn" id="clearBtn" type="button" style="padding:6px 10px;">Bersihkan</button>
     </div>
 
     <div class="queue" id="queue"></div>
@@ -304,16 +305,33 @@ async function processEntry(entry, dpi){
     for (let i = 1; i <= pdf.numPages; i++){
       const page = await pdf.getPage(i);
       const viewport = page.getViewport({ scale: effectiveDpi / 72 });
-      const canvas = document.createElement('canvas');
+      let canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+      if (ratioMode === 'a4-nofoto'){
+        const cutY = await findLampiranCutY(page, viewport);
+        if (cutY !== null){
+          const margin = Math.round(effectiveDpi * 0.08); // sedikit ruang di atas label
+          const keepHeight = Math.max(1, Math.round(cutY - margin));
+          if (keepHeight < canvas.height){
+            const cropped = document.createElement('canvas');
+            cropped.width = canvas.width;
+            cropped.height = keepHeight;
+            cropped.getContext('2d').drawImage(canvas, 0, 0, canvas.width, keepHeight, 0, 0, canvas.width, keepHeight);
+            canvas = cropped;
+          }
+        }
+      }
       pageCanvases.push(canvas);
     }
 
     const trimmed = trimPages(pageCanvases, effectiveDpi);
     const natural = stitchNatural(trimmed);
-    const finalCanvas = ratioMode === 'a4' ? fitToPrintA4(natural, A4_W, A4_H) : natural;
+    const finalCanvas = (ratioMode === 'a4' || ratioMode === 'a4-nofoto')
+      ? fitToPrintA4(natural, A4_W, A4_H)
+      : natural;
 
     const blob = await new Promise(res => finalCanvas.toBlob(res, 'image/png'));
 
@@ -334,6 +352,18 @@ async function processEntry(entry, dpi){
     entry.statusEl.textContent = 'gagal: ' + (err.message || 'periksa file');
     entry.statusEl.classList.add('error');
   }
+}
+
+// Cari posisi Y kata "Lampiran" pada suatu halaman (dipakai mode "A4 tanpa foto").
+// Kalau ketemu, semua yang ada di bawah kata itu (biasanya foto lampiran)
+// akan dipotong sebelum digabung. Kalau tidak ada kata "Lampiran" di
+// halaman itu, dibiarkan utuh seperti biasa.
+async function findLampiranCutY(page, viewport){
+  const textContent = await page.getTextContent();
+  const item = textContent.items.find(it => it.str && it.str.trim().toLowerCase() === 'lampiran');
+  if (!item) return null;
+  const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+  return tx[5]; // posisi y (pixel canvas) dari teks tersebut
 }
 
 // Hitung DPI efektif yang aman untuk seluruh halaman dalam satu file,
