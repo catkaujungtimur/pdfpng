@@ -117,17 +117,24 @@
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     font-size:11px; color:var(--ink-soft); flex-wrap:wrap;
   }
+
+  footer{
+    margin-top:32px; padding-top:16px;
+    border-top:1px solid var(--line);
+    font-size:10px; color:var(--ink-soft);
+    text-align:center; line-height:1.5;
+  }
 </style>
 </head>
 <body>
   <div class="sheet">
     <h1>Satukan PDF, hilangkan<br>spasi kosong.</h1>
 
-    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Pilih atau taruh file PDF">
-      <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none">
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Pilih atau taruh file PDF atau ZIP">
+      <input type="file" id="fileInput" accept=".pdf,.zip,application/pdf,application/zip,application/x-zip-compressed" multiple style="display:none">
       <div class="drop-icon"><span class="page"></span><span class="page"></span></div>
-      <div class="drop-title">Taruh file PDF di sini, atau klik untuk pilih</div>
-      <div class="drop-sub">Bisa banyak file sekaligus</div>
+      <div class="drop-title">Taruh file PDF/ZIP di sini, atau klik untuk pilih</div>
+      <div class="drop-sub">Bisa banyak file sekaligus · ZIP berisi banyak PDF juga bisa</div>
     </div>
 
     <div class="dpi-row">
@@ -162,6 +169,10 @@
 
     <div class="queue" id="queue"></div>
     <div class="summary" id="summary" style="display:none;"></div>
+
+    <footer>
+      pdfpng · PDF &amp; ZIP diproses sepenuhnya di browser ini — tidak ada file yang dikirim ke server manapun.
+    </footer>
   </div>
 
 <script>
@@ -271,7 +282,12 @@ dropEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fileInput.click(); }
 });
 dropEl.addEventListener('drop', e => {
-  const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf');
+  const files = [...e.dataTransfer.files].filter(f =>
+    f.type === 'application/pdf' ||
+    f.type === 'application/zip' ||
+    f.type === 'application/x-zip-compressed' ||
+    /\.(pdf|zip)$/i.test(f.name)
+  );
   handleFiles(files);
 });
 fileInput.addEventListener('change', e => {
@@ -351,25 +367,82 @@ async function downloadAllAsZip(){
   }
 }
 
+// Tambah satu file PDF ke antrean & langsung proses. Dipakai baik untuk
+// PDF yang di-drop langsung, maupun PDF hasil ekstrak dari dalam ZIP.
+function addFileEntry(file, dpi){
+  const row = document.createElement('div');
+  row.className = 'item';
+  row.innerHTML = `
+    <img class="item-thumb" style="visibility:hidden">
+    <span class="item-name">${escapeHtml(file.name)}</span>
+    <span class="item-status">memproses…</span>
+  `;
+  queueEl.prepend(row);
+  const entry = {
+    file,
+    statusEl: row.querySelector('.item-status'),
+    thumbEl: row.querySelector('.item-thumb'),
+    url: null
+  };
+  filesQueue.push(entry);
+  processEntry(entry, dpi);
+  return entry;
+}
+
+// Buka file ZIP, cari semua PDF di dalamnya (termasuk yang ada di subfolder),
+// lalu masukkan tiap PDF ke antrean seperti biasa.
+async function handleZipFile(zipFile){
+  const row = document.createElement('div');
+  row.className = 'item';
+  row.innerHTML = `
+    <span class="item-name">${escapeHtml(zipFile.name)}</span>
+    <span class="item-status">membuka ZIP…</span>
+  `;
+  queueEl.prepend(row);
+  const statusEl = row.querySelector('.item-status');
+
+  try {
+    if (typeof JSZip === 'undefined'){
+      throw new Error('komponen ZIP gagal dimuat dari CDN');
+    }
+    const buf = await zipFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const pdfEntries = Object.values(zip.files).filter(
+      f => !f.dir && /\.pdf$/i.test(f.name)
+    );
+
+    if (pdfEntries.length === 0){
+      statusEl.textContent = 'tidak ada file PDF di dalam ZIP ini';
+      statusEl.classList.add('error');
+      return;
+    }
+
+    const dpi = getSelectedDpi();
+    for (const zEntry of pdfEntries){
+      const pdfBuf = await zEntry.async('arraybuffer');
+      const baseName = zEntry.name.split('/').pop(); // buang path folder di dalam zip
+      const pseudoFile = { name: baseName, arrayBuffer: async () => pdfBuf };
+      addFileEntry(pseudoFile, dpi);
+    }
+    row.remove(); // baris "membuka ZIP" tidak perlu lagi, sudah digantikan baris per-PDF
+  } catch (err){
+    console.error(err);
+    statusEl.textContent = 'gagal membuka ZIP: ' + (err.message || '');
+    statusEl.classList.add('error');
+  }
+}
+
 function handleFiles(files){
   const dpi = getSelectedDpi();
   files.forEach(file => {
-    const row = document.createElement('div');
-    row.className = 'item';
-    row.innerHTML = `
-      <img class="item-thumb" style="visibility:hidden">
-      <span class="item-name">${escapeHtml(file.name)}</span>
-      <span class="item-status">memproses…</span>
-    `;
-    queueEl.prepend(row);
-    const entry = {
-      file,
-      statusEl: row.querySelector('.item-status'),
-      thumbEl: row.querySelector('.item-thumb'),
-      url: null
-    };
-    filesQueue.push(entry);
-    processEntry(entry, dpi);
+    const isZip = /\.zip$/i.test(file.name)
+      || file.type === 'application/zip'
+      || file.type === 'application/x-zip-compressed';
+    if (isZip){
+      handleZipFile(file);
+    } else {
+      addFileEntry(file, dpi);
+    }
   });
 }
 
