@@ -319,9 +319,34 @@ function updateSummary(){
   summaryEl.style.display = 'flex';
   summaryEl.innerHTML = `
     <span>${done.length} dari ${filesQueue.length} file siap · Total: ${formatBytes(totalBytes)}</span>
-    <button class="btn" id="downloadAllBtn" type="button">Unduh Semua (ZIP)</button>
+    <span style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" id="downloadAllPngBtn" type="button">Unduh Semua (PNG)</button>
+      <button class="btn" id="downloadAllBtn" type="button">Unduh Semua (ZIP)</button>
+    </span>
   `;
   document.getElementById('downloadAllBtn').addEventListener('click', downloadAllAsZip);
+  document.getElementById('downloadAllPngBtn').addEventListener('click', downloadAllAsPngs);
+}
+
+// Unduh tiap PNG satu-satu (bukan dibungkus ZIP). Browser biasanya akan
+// menampilkan izin/konfirmasi kalau banyak file diunduh sekaligus dari satu
+// klik — itu wajar, pengamanan bawaan browser, bukan bug. Jeda kecil antar
+// unduhan dipasang supaya tidak langsung ditolak.
+function downloadAllAsPngs(){
+  const done = filesQueue.filter(e => e.blob);
+  if (done.length === 0) return;
+
+  done.forEach((entry, i) => {
+    setTimeout(() => {
+      const outName = entry.file.name.replace(/\.pdf$/i, '') + '.png';
+      const a = document.createElement('a');
+      a.href = entry.url;
+      a.download = outName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, i * 350);
+  });
 }
 
 async function downloadAllAsZip(){
