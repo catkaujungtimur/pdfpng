@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>pdfpng</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.2/jszip.min.js"></script>
 <style>
   :root{
     --paper: #F7F5F0;
@@ -107,6 +108,15 @@
     text-decoration:none; white-space:nowrap; display:inline-block;
   }
   .btn:hover{ background:var(--stamp); border-color:var(--stamp); }
+  .btn:disabled{ opacity:0.5; cursor:default; }
+  .btn.small{ font-size:10px; padding:4px 8px; }
+
+  .summary{
+    margin-top:16px; padding:12px 14px;
+    border:1px solid var(--line); background:var(--paper-2); border-radius:2px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    font-size:11px; color:var(--ink-soft); flex-wrap:wrap;
+  }
 </style>
 </head>
 <body>
@@ -151,6 +161,7 @@
     </div>
 
     <div class="queue" id="queue"></div>
+    <div class="summary" id="summary" style="display:none;"></div>
   </div>
 
 <script>
@@ -170,6 +181,17 @@ function getA4Size(dpi){
     h: Math.round(297 * dpi / 25.4)
   };
 }
+
+// Format ukuran file jadi B/KB/MB/GB yang mudah dibaca.
+function formatBytes(bytes){
+  if (!bytes || bytes < 1024) return (bytes || 0) + ' B';
+  const units = ['KB', 'MB', 'GB'];
+  let val = bytes / 1024, i = 0;
+  while (val >= 1024 && i < units.length - 1){ val /= 1024; i++; }
+  return (val < 10 ? val.toFixed(1) : Math.round(val)) + ' ' + units[i];
+}
+
+const summaryEl = document.getElementById('summary');
 
 const dropEl = document.getElementById('drop');
 const fileInput = document.getElementById('fileInput');
@@ -266,7 +288,68 @@ clearBtn.addEventListener('click', () => {
   filesQueue.forEach(entry => { if (entry.url) URL.revokeObjectURL(entry.url); });
   filesQueue.length = 0;
   queueEl.innerHTML = '';
+  updateSummary();
 });
+
+// Perbarui kotak ringkasan di bawah daftar: tombol "Unduh Semua" + total ukuran.
+// Dipanggil tiap kali ada file selesai diproses (sukses/gagal) atau saat Bersihkan.
+function updateSummary(){
+  const done = filesQueue.filter(e => e.blob);
+  if (filesQueue.length < 2 || done.length === 0){
+    summaryEl.style.display = 'none';
+    return;
+  }
+  const totalBytes = done.reduce((sum, e) => sum + (e.sizeBytes || 0), 0);
+  summaryEl.style.display = 'flex';
+  summaryEl.innerHTML = `
+    <span>${done.length} dari ${filesQueue.length} file siap · Total: ${formatBytes(totalBytes)}</span>
+    <button class="btn" id="downloadAllBtn" type="button">Unduh Semua (ZIP)</button>
+  `;
+  document.getElementById('downloadAllBtn').addEventListener('click', downloadAllAsZip);
+}
+
+async function downloadAllAsZip(){
+  if (typeof JSZip === 'undefined'){
+    alert('Komponen ZIP gagal dimuat dari CDN. Coba refresh halaman atau periksa koneksi internet.');
+    return;
+  }
+  const done = filesQueue.filter(e => e.blob);
+  if (done.length === 0) return;
+
+  const btn = document.getElementById('downloadAllBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyiapkan ZIP…';
+
+  try {
+    const zip = new JSZip();
+    const usedNames = new Set();
+    for (const entry of done){
+      let name = entry.file.name.replace(/\.pdf$/i, '') + '.png';
+      // Hindari nama bentrok kalau ada 2 file PDF dengan nama sama persis.
+      let finalName = name, counter = 1;
+      while (usedNames.has(finalName)){
+        finalName = name.replace(/\.png$/i, `_${++counter}.png`);
+      }
+      usedNames.add(finalName);
+      zip.file(finalName, entry.blob);
+    }
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pdfpng_hasil.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (err){
+    console.error(err);
+    alert('Gagal membuat ZIP: ' + (err.message || 'coba lagi'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Unduh Semua (ZIP)';
+  }
+}
 
 function handleFiles(files){
   const dpi = getSelectedDpi();
@@ -355,6 +438,8 @@ async function processEntry(entry, dpi){
 
     if (entry.url) URL.revokeObjectURL(entry.url);
     entry.url = URL.createObjectURL(blob);
+    entry.blob = blob;
+    entry.sizeBytes = blob.size;
 
     entry.thumbEl.src = entry.url;
     entry.thumbEl.style.visibility = 'visible';
@@ -363,12 +448,23 @@ async function processEntry(entry, dpi){
     const dpiLabel = Math.round(effectiveDpi) + ' DPI' + dpiNote;
     entry.statusEl.innerHTML = `
       <a class="btn" href="${entry.url}" download="${escapeAttr(outName)}">Unduh PNG</a>
-      <span class="item-dpi-tag">${dpiLabel}</span>
+      <span class="item-dpi-tag">${dpiLabel} · ${finalCanvas.width}×${finalCanvas.height}px · ${formatBytes(blob.size)}</span>
     `;
+    updateSummary();
   } catch (err){
     console.error(err);
-    entry.statusEl.textContent = 'gagal: ' + (err.message || 'periksa file');
+    entry.blob = null;
+    entry.sizeBytes = 0;
+    entry.statusEl.innerHTML = '';
+    entry.statusEl.textContent = 'gagal: ' + (err.message || 'periksa file') + ' ';
     entry.statusEl.classList.add('error');
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'btn small';
+    retryBtn.type = 'button';
+    retryBtn.textContent = 'Ulangi';
+    retryBtn.addEventListener('click', () => processEntry(entry, getSelectedDpi()));
+    entry.statusEl.appendChild(retryBtn);
+    updateSummary();
   }
 }
 
