@@ -111,6 +111,20 @@
   .btn:disabled{ opacity:0.5; cursor:default; }
   .btn.small{ font-size:10px; padding:4px 8px; }
 
+  .queue-progress{
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:11px; color:var(--ink-soft);
+  }
+  .queue-progress.done{ color:var(--ok); }
+  .spinner{
+    width:11px; height:11px; flex-shrink:0;
+    border:2px solid var(--line);
+    border-top-color:var(--stamp);
+    border-radius:50%;
+    animation:spin 0.7s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
   .summary{
     margin-top:16px; padding:12px 14px;
     border:1px solid var(--line); background:var(--paper-2); border-radius:2px;
@@ -165,6 +179,7 @@
 
     <div class="dpi-row">
       <button class="btn" id="clearBtn" type="button" style="padding:6px 10px;">Bersihkan</button>
+      <span id="queueProgress" class="queue-progress" style="display:none;"></span>
     </div>
 
     <div class="queue" id="queue"></div>
@@ -282,8 +297,46 @@ const filesQueue = [];
 const processingQueue = [];
 let isProcessingQueue = false;
 
+// Pelacak progres batch saat ini, ditampilkan di sebelah tombol Bersihkan.
+// batchTotal bertambah tiap ada file baru masuk antrean SELAMA batch masih
+// berjalan; batchDone bertambah tiap 1 file selesai (sukses/gagal).
+const queueProgressEl = document.getElementById('queueProgress');
+let batchTotal = 0;
+let batchDone = 0;
+let hideProgressTimeout = null;
+
+function updateProgressUI(){
+  clearTimeout(hideProgressTimeout);
+  queueProgressEl.classList.remove('done');
+  if (batchTotal === 0){
+    queueProgressEl.style.display = 'none';
+    queueProgressEl.innerHTML = '';
+    return;
+  }
+  const percent = Math.round((batchDone / batchTotal) * 100);
+  queueProgressEl.style.display = 'inline-flex';
+  queueProgressEl.innerHTML = `<span class="spinner"></span> Memproses ${batchDone}/${batchTotal} (${percent}%)`;
+}
+
+function showQueueFinished(){
+  queueProgressEl.style.display = 'inline-flex';
+  queueProgressEl.classList.add('done');
+  queueProgressEl.innerHTML = 'Selesai ✓';
+  // Sembunyikan lagi setelah sejenak, kecuali ada batch baru yang masuk duluan.
+  hideProgressTimeout = setTimeout(() => {
+    if (!isProcessingQueue && processingQueue.length === 0){
+      batchTotal = 0;
+      batchDone = 0;
+      queueProgressEl.style.display = 'none';
+      queueProgressEl.innerHTML = '';
+    }
+  }, 1800);
+}
+
 function enqueueProcessing(entry, dpi){
   processingQueue.push({ entry, dpi });
+  batchTotal++;
+  updateProgressUI();
   if (entry.statusEl && !entry.blob){
     entry.statusEl.textContent = 'menunggu giliran…';
   }
@@ -300,8 +353,11 @@ async function runProcessingQueue(){
     } catch (err){
       console.error('Kesalahan tak terduga di antrean:', err);
     }
+    batchDone++;
+    updateProgressUI();
   }
   isProcessingQueue = false;
+  showQueueFinished();
 }
 
 ['dragenter','dragover'].forEach(ev =>
@@ -338,6 +394,10 @@ clearBtn.addEventListener('click', () => {
   filesQueue.forEach(entry => { if (entry.url) URL.revokeObjectURL(entry.url); });
   filesQueue.length = 0;
   queueEl.innerHTML = '';
+  processingQueue.length = 0;
+  batchTotal = 0;
+  batchDone = 0;
+  updateProgressUI();
   updateSummary();
 });
 
