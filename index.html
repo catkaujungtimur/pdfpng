@@ -149,24 +149,20 @@
       <div class="drop-icon"><span class="page"></span><span class="page"></span></div>
       <div class="drop-title">Taruh file PDF/ZIP di sini, atau klik untuk pilih</div>
       <div class="drop-sub">Bisa banyak file sekaligus · ZIP berisi banyak PDF juga bisa</div>
+      <div class="drop-sub">mau PDF 1 halaman, 2 halaman, 3 halaman, 10 halaman, terserah. bebas.</div>
     </div>
 
     <div class="dpi-row">
       <span class="row-label">Resolusi:</span>
       <select id="dpiSelect">
-        <option value="px2800" selected>2800 px — rekomendasi PDF 2 halaman</option>
-        <option value="px2000">2000 px — rekomendasi PDF 3 halaman</option>
+        <option value="px1750" selected>1750 px — ukuran minimal jelas A4 dengan foto</option>
+        <option value="px1500">1500 px — ukuran minimal jelas A4 tanpa foto</option>
         <option value="custom-px">Input manual (pixel)</option>
-        <option value="300">300 DPI</option>
-        <option value="450">450 DPI</option>
-        <option value="600">600 DPI</option>
-        <option value="custom-dpi">Input manual (DPI)</option>
       </select>
       <input type="number" id="customPxInput" class="custom-input" placeholder="Lebar px, mis. 2480"
         min="500" max="12000" style="display:none;">
-      <input type="number" id="customDpiInput" class="custom-input" placeholder="DPI, mis. 300"
-        min="72" max="1450" style="display:none;">
     </div>
+    <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0;">Semakin besar resolusi, semakin bagus hasilnya, tapi semakin besar juga ukurannya.</p>
 
     <div class="dpi-row">
       <span class="row-label">Mode:</span>
@@ -224,43 +220,30 @@ const fileInput = document.getElementById('fileInput');
 const queueEl = document.getElementById('queue');
 const dpiSelect = document.getElementById('dpiSelect');
 const customPxInput = document.getElementById('customPxInput');
-const customDpiInput = document.getElementById('customDpiInput');
 const ratioSelect = document.getElementById('ratioSelect');
 const clearBtn = document.getElementById('clearBtn');
 
 // Ambil DPI yang sedang berlaku dari pilihan dropdown resolusi.
-// "px2800"/"px2000": preset pixel tetap (hasil eksperimen langsung di PPT).
+// "px1750"/"px1500": preset pixel tetap (hasil eksperimen langsung di PPT).
 // "custom-px": pixel bebas dari pengguna.
-// "300"/"450"/"600": preset DPI biasa.
-// "custom-dpi": DPI bebas dari pengguna.
 // Pixel & DPI itu cuma dua cara menyebut angka yang sama untuk kertas
 // berukuran tetap (sisi 210mm): dpi = pixel × 25.4 / 210.
 function pxToDpi(px){ return px * 25.4 / 210; }
 
 function getSelectedDpi(){
   const val = dpiSelect.value;
-  if (val === 'px2800') return pxToDpi(2800);
-  if (val === 'px2000') return pxToDpi(2000);
-  if (val === 'custom-px'){
-    let px = parseInt(customPxInput.value, 10);
-    if (!px || px < 300) px = 300;
-    if (px > 12000) px = 12000; // batas wajar, mencegah kanvas kebesaran tanpa sengaja
-    return pxToDpi(px);
-  }
-  if (val === 'custom-dpi'){
-    let dpi = parseInt(customDpiInput.value, 10);
-    if (!dpi || dpi < 72) dpi = 72;
-    if (dpi > 1450) dpi = 1450; // setara batas 12000px di atas, biar konsisten
-    return dpi;
-  }
-  return parseInt(val, 10); // '300', '450', '600'
+  if (val === 'px1750') return pxToDpi(1750);
+  if (val === 'px1500') return pxToDpi(1500);
+  // 'custom-px'
+  let px = parseInt(customPxInput.value, 10);
+  if (!px || px < 300) px = 300;
+  if (px > 12000) px = 12000; // batas wajar, mencegah kanvas kebesaran tanpa sengaja
+  return pxToDpi(px);
 }
 
 function updateCustomInputsVisibility(){
   customPxInput.style.display = dpiSelect.value === 'custom-px' ? 'inline-block' : 'none';
-  customDpiInput.style.display = dpiSelect.value === 'custom-dpi' ? 'inline-block' : 'none';
   if (dpiSelect.value === 'custom-px' && !customPxInput.value) customPxInput.value = 2480;
-  if (dpiSelect.value === 'custom-dpi' && !customDpiInput.value) customDpiInput.value = 300;
 }
 
 dpiSelect.addEventListener('change', () => {
@@ -269,10 +252,6 @@ dpiSelect.addEventListener('change', () => {
   filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
 customPxInput.addEventListener('change', () => {
-  const dpi = getSelectedDpi();
-  filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
-});
-customDpiInput.addEventListener('change', () => {
   const dpi = getSelectedDpi();
   filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
