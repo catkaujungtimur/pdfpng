@@ -171,7 +171,7 @@
     <div class="summary" id="summary" style="display:none;"></div>
 
     <footer>
-      pdfpng · sebuah alat yang tidak penting . untuk mengerjakan sesuatu yang juga tidak penting . 
+      pdfpng · adalah alat yang tidak penting . untuk mengerjakan sesuatu yang juga tidak penting . 
     </footer>
   </div>
 
@@ -250,13 +250,16 @@ function updateCustomInputsVisibility(){
 
 dpiSelect.addEventListener('change', () => {
   updateCustomInputsVisibility();
-  filesQueue.forEach(entry => processEntry(entry, getSelectedDpi()));
+  const dpi = getSelectedDpi();
+  filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
 customPxInput.addEventListener('change', () => {
-  filesQueue.forEach(entry => processEntry(entry, getSelectedDpi()));
+  const dpi = getSelectedDpi();
+  filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
 customDpiInput.addEventListener('change', () => {
-  filesQueue.forEach(entry => processEntry(entry, getSelectedDpi()));
+  const dpi = getSelectedDpi();
+  filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
 
 // Batas aman ukuran kanvas lintas-browser. Kalau halaman PDF (dikali DPI
@@ -270,6 +273,36 @@ const MAX_CANVAS_AREA = 45_000_000;
 // Menyimpan semua file yang sudah dimasukkan, supaya bisa diproses ulang
 // otomatis kalau resolusi diganti belakangan.
 const filesQueue = [];
+
+// Antrean pemrosesan SEKUENSIAL: hanya 1 file dirender pada satu waktu.
+// Penting untuk komputer yang tidak kuat — kalau banyak file (misal dari
+// satu ZIP berisi puluhan PDF) dirender BERSAMAAN, memori & CPU bisa
+// kehabisan sampai browser/komputer hang. Dengan antrean ini, file lain
+// menunggu giliran sampai file sebelumnya selesai diproses.
+const processingQueue = [];
+let isProcessingQueue = false;
+
+function enqueueProcessing(entry, dpi){
+  processingQueue.push({ entry, dpi });
+  if (entry.statusEl && !entry.blob){
+    entry.statusEl.textContent = 'menunggu giliran…';
+  }
+  runProcessingQueue();
+}
+
+async function runProcessingQueue(){
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+  while (processingQueue.length > 0){
+    const { entry, dpi } = processingQueue.shift();
+    try {
+      await processEntry(entry, dpi);
+    } catch (err){
+      console.error('Kesalahan tak terduga di antrean:', err);
+    }
+  }
+  isProcessingQueue = false;
+}
 
 ['dragenter','dragover'].forEach(ev =>
   dropEl.addEventListener(ev, e => { e.preventDefault(); dropEl.classList.add('drag'); })
@@ -296,7 +329,8 @@ fileInput.addEventListener('change', e => {
 });
 
 ratioSelect.addEventListener('change', () => {
-  filesQueue.forEach(entry => processEntry(entry, getSelectedDpi()));
+  const dpi = getSelectedDpi();
+  filesQueue.forEach(entry => enqueueProcessing(entry, dpi));
 });
 
 clearBtn.addEventListener('click', () => {
@@ -307,25 +341,40 @@ clearBtn.addEventListener('click', () => {
   updateSummary();
 });
 
-// Perbarui kotak ringkasan di bawah daftar: tombol "Unduh Semua" + total ukuran.
-// Dipanggil tiap kali ada file selesai diproses (sukses/gagal) atau saat Bersihkan.
+// Perbarui kotak ringkasan di bawah daftar: tombol "Unduh Semua", total ukuran,
+// dan "Ulangi Semua yang Gagal" kalau ada yang gagal. Dipanggil tiap kali ada
+// file selesai diproses (sukses/gagal) atau saat Bersihkan.
 function updateSummary(){
   const done = filesQueue.filter(e => e.blob);
-  if (filesQueue.length < 2 || done.length === 0){
+  const failed = filesQueue.filter(e => e.failed);
+  const showDownloadAll = filesQueue.length >= 2 && done.length > 0;
+  const showRetryAll = failed.length > 0;
+
+  if (!showDownloadAll && !showRetryAll){
     summaryEl.style.display = 'none';
     return;
   }
+
   const totalBytes = done.reduce((sum, e) => sum + (e.sizeBytes || 0), 0);
   summaryEl.style.display = 'flex';
   summaryEl.innerHTML = `
-    <span>${done.length} dari ${filesQueue.length} file siap · Total: ${formatBytes(totalBytes)}</span>
+    <span>${done.length} dari ${filesQueue.length} file siap${done.length > 0 ? ' · Total: ' + formatBytes(totalBytes) : ''}</span>
     <span style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn" id="downloadAllPngBtn" type="button">Unduh Semua (PNG)</button>
-      <button class="btn" id="downloadAllBtn" type="button">Unduh Semua (ZIP)</button>
+      ${showRetryAll ? `<button class="btn" id="retryAllBtn" type="button">Ulangi Semua yang Gagal (${failed.length})</button>` : ''}
+      ${showDownloadAll ? `<button class="btn" id="downloadAllPngBtn" type="button">Unduh Semua (PNG)</button>` : ''}
+      ${showDownloadAll ? `<button class="btn" id="downloadAllBtn" type="button">Unduh Semua (ZIP)</button>` : ''}
     </span>
   `;
-  document.getElementById('downloadAllBtn').addEventListener('click', downloadAllAsZip);
-  document.getElementById('downloadAllPngBtn').addEventListener('click', downloadAllAsPngs);
+  if (showRetryAll){
+    document.getElementById('retryAllBtn').addEventListener('click', () => {
+      const dpi = getSelectedDpi();
+      filesQueue.filter(e => e.failed).forEach(entry => enqueueProcessing(entry, dpi));
+    });
+  }
+  if (showDownloadAll){
+    document.getElementById('downloadAllBtn').addEventListener('click', downloadAllAsZip);
+    document.getElementById('downloadAllPngBtn').addEventListener('click', downloadAllAsPngs);
+  }
 }
 
 // Unduh tiap PNG satu-satu (bukan dibungkus ZIP). Browser biasanya akan
@@ -400,7 +449,7 @@ function addFileEntry(file, dpi){
   row.innerHTML = `
     <img class="item-thumb" style="visibility:hidden">
     <span class="item-name">${escapeHtml(file.name)}</span>
-    <span class="item-status">memproses…</span>
+    <span class="item-status">menunggu giliran…</span>
   `;
   queueEl.prepend(row);
   const entry = {
@@ -410,7 +459,7 @@ function addFileEntry(file, dpi){
     url: null
   };
   filesQueue.push(entry);
-  processEntry(entry, dpi);
+  enqueueProcessing(entry, dpi);
   return entry;
 }
 
@@ -446,7 +495,11 @@ async function handleZipFile(zipFile){
     for (const zEntry of pdfEntries){
       const pdfBuf = await zEntry.async('arraybuffer');
       const baseName = zEntry.name.split('/').pop(); // buang path folder di dalam zip
-      const pseudoFile = { name: baseName, arrayBuffer: async () => pdfBuf };
+      // PENTING: kembalikan SALINAN baru (.slice(0)) tiap kali arrayBuffer()
+      // dipanggil. pdf.js men-transfer kepemilikan buffer ke web worker saat
+      // dipakai, jadi kalau pdfBuf yang sama dipakai lagi (misal saat resolusi
+      // diganti & diproses ulang), akan gagal dengan error "detached ArrayBuffer".
+      const pseudoFile = { name: baseName, arrayBuffer: async () => pdfBuf.slice(0) };
       addFileEntry(pseudoFile, dpi);
     }
     row.remove(); // baris "membuka ZIP" tidak perlu lagi, sudah digantikan baris per-PDF
@@ -501,7 +554,10 @@ async function processEntry(entry, dpi){
     const { w: A4_W, h: A4_H } = getA4Size(effectiveDpi);
 
     const pageCanvases = [];
+    let lampiranFound = false; // sekali ketemu, semua halaman SESUDAHNYA dibuang total
     for (let i = 1; i <= pdf.numPages; i++){
+      if (lampiranFound) break; // halaman lampiran (foto dsb) bisa lebih dari 1 halaman
+
       const page = await pdf.getPage(i);
       const viewport = page.getViewport({ scale: effectiveDpi / 72 });
       let canvas = document.createElement('canvas');
@@ -521,6 +577,10 @@ async function processEntry(entry, dpi){
             cropped.getContext('2d').drawImage(canvas, 0, 0, canvas.width, keepHeight, 0, 0, canvas.width, keepHeight);
             canvas = cropped;
           }
+          // Tandai: halaman ini adalah tempat "Lampiran" muncul. Halaman-halaman
+          // setelah ini (misal foto yang menyambung ke halaman berikutnya)
+          // tidak ikut dirender sama sekali, bukan cuma dipotong sebagian.
+          lampiranFound = true;
         }
       }
       pageCanvases.push(canvas);
@@ -538,6 +598,7 @@ async function processEntry(entry, dpi){
     entry.url = URL.createObjectURL(blob);
     entry.blob = blob;
     entry.sizeBytes = blob.size;
+    entry.failed = false;
 
     entry.thumbEl.src = entry.url;
     entry.thumbEl.style.visibility = 'visible';
@@ -553,6 +614,7 @@ async function processEntry(entry, dpi){
     console.error(err);
     entry.blob = null;
     entry.sizeBytes = 0;
+    entry.failed = true;
     entry.statusEl.innerHTML = '';
     entry.statusEl.textContent = 'gagal: ' + (err.message || 'periksa file') + ' ';
     entry.statusEl.classList.add('error');
@@ -560,7 +622,7 @@ async function processEntry(entry, dpi){
     retryBtn.className = 'btn small';
     retryBtn.type = 'button';
     retryBtn.textContent = 'Ulangi';
-    retryBtn.addEventListener('click', () => processEntry(entry, getSelectedDpi()));
+    retryBtn.addEventListener('click', () => enqueueProcessing(entry, getSelectedDpi()));
     entry.statusEl.appendChild(retryBtn);
     updateSummary();
   }
