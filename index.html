@@ -90,13 +90,17 @@
     background:var(--paper-2);
     border-radius:2px;
     padding:12px 14px;
-    display:flex; align-items:center; gap:12px;
+    display:flex; align-items:flex-start; gap:12px;
     font-size:12px;
   }
   .item-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .item-status{ color:var(--ink-soft); font-size:11px; white-space:nowrap; display:flex; align-items:center; gap:8px; }
   .item-status.error{ color:var(--stamp-ink); }
   .item-dpi-tag{ color:var(--ok); font-size:10px; }
+  .page-output-row{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .page-output-row + .page-output-row{ margin-top:6px; }
   .item-thumb{
     width:28px; height:36px; object-fit:cover;
     border:1px solid var(--line); background:#fff; flex-shrink:0;
@@ -182,7 +186,7 @@
     <div class="summary" id="summary" style="display:none;"></div>
 
     <footer>
-      pdfpng · adalah alat yang tidak penting . untuk mengerjakan sesuatu yang juga tidak penting . 
+      pdfpng · PDF &amp; ZIP diproses sepenuhnya di browser ini — tidak ada file yang dikirim ke server manapun.
     </footer>
   </div>
 
@@ -380,11 +384,29 @@ clearBtn.addEventListener('click', () => {
   updateSummary();
 });
 
+// Ambil daftar output (blob PNG) dari satu entry, apapun modenya:
+// - mode A4/A4-tanpa-foto: 1 entry = 1 output
+// - mode Bebas: 1 entry bisa punya banyak output (1 per halaman PDF)
+function getEntryOutputs(entry){
+  if (entry.pages){
+    return entry.pages.map(p => ({ url: p.url, blob: p.blob, sizeBytes: p.sizeBytes, outName: p.outName }));
+  }
+  if (entry.blob){
+    return [{
+      url: entry.url,
+      blob: entry.blob,
+      sizeBytes: entry.sizeBytes,
+      outName: entry.file.name.replace(/\.pdf$/i, '') + '.png'
+    }];
+  }
+  return [];
+}
+
 // Perbarui kotak ringkasan di bawah daftar: tombol "Unduh Semua", total ukuran,
 // dan "Ulangi Semua yang Gagal" kalau ada yang gagal. Dipanggil tiap kali ada
 // file selesai diproses (sukses/gagal) atau saat Bersihkan.
 function updateSummary(){
-  const done = filesQueue.filter(e => e.blob);
+  const done = filesQueue.filter(e => getEntryOutputs(e).length > 0);
   const failed = filesQueue.filter(e => e.failed);
   const showDownloadAll = filesQueue.length >= 2 && done.length > 0;
   const showRetryAll = failed.length > 0;
@@ -394,10 +416,12 @@ function updateSummary(){
     return;
   }
 
-  const totalBytes = done.reduce((sum, e) => sum + (e.sizeBytes || 0), 0);
+  const allOutputs = filesQueue.flatMap(getEntryOutputs);
+  const totalBytes = allOutputs.reduce((sum, o) => sum + (o.sizeBytes || 0), 0);
   summaryEl.style.display = 'flex';
+  const pngCountNote = allOutputs.length !== done.length ? ` (${allOutputs.length} PNG)` : '';
   summaryEl.innerHTML = `
-    <span>${done.length} dari ${filesQueue.length} file siap${done.length > 0 ? ' · Total: ' + formatBytes(totalBytes) : ''}</span>
+    <span>${done.length} dari ${filesQueue.length} file siap${pngCountNote}${done.length > 0 ? ' · Total: ' + formatBytes(totalBytes) : ''}</span>
     <span style="display:flex;gap:8px;flex-wrap:wrap;">
       ${showRetryAll ? `<button class="btn" id="retryAllBtn" type="button">Ulangi Semua yang Gagal (${failed.length})</button>` : ''}
       ${showDownloadAll ? `<button class="btn" id="downloadAllPngBtn" type="button">Unduh Semua (PNG)</button>` : ''}
@@ -421,15 +445,14 @@ function updateSummary(){
 // klik — itu wajar, pengamanan bawaan browser, bukan bug. Jeda kecil antar
 // unduhan dipasang supaya tidak langsung ditolak.
 function downloadAllAsPngs(){
-  const done = filesQueue.filter(e => e.blob);
-  if (done.length === 0) return;
+  const allOutputs = filesQueue.flatMap(getEntryOutputs);
+  if (allOutputs.length === 0) return;
 
-  done.forEach((entry, i) => {
+  allOutputs.forEach((out, i) => {
     setTimeout(() => {
-      const outName = entry.file.name.replace(/\.pdf$/i, '') + '.png';
       const a = document.createElement('a');
-      a.href = entry.url;
-      a.download = outName;
+      a.href = out.url;
+      a.download = out.outName;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -442,8 +465,8 @@ async function downloadAllAsZip(){
     alert('Komponen ZIP gagal dimuat dari CDN. Coba refresh halaman atau periksa koneksi internet.');
     return;
   }
-  const done = filesQueue.filter(e => e.blob);
-  if (done.length === 0) return;
+  const allOutputs = filesQueue.flatMap(getEntryOutputs);
+  if (allOutputs.length === 0) return;
 
   const btn = document.getElementById('downloadAllBtn');
   btn.disabled = true;
@@ -452,15 +475,14 @@ async function downloadAllAsZip(){
   try {
     const zip = new JSZip();
     const usedNames = new Set();
-    for (const entry of done){
-      let name = entry.file.name.replace(/\.pdf$/i, '') + '.png';
-      // Hindari nama bentrok kalau ada 2 file PDF dengan nama sama persis.
-      let finalName = name, counter = 1;
+    for (const out of allOutputs){
+      // Hindari nama bentrok kalau ada 2 file dengan nama akhir sama persis.
+      let finalName = out.outName, counter = 1;
       while (usedNames.has(finalName)){
-        finalName = name.replace(/\.png$/i, `_${++counter}.png`);
+        finalName = out.outName.replace(/\.png$/i, `_${++counter}.png`);
       }
       usedNames.add(finalName);
-      zip.file(finalName, entry.blob);
+      zip.file(finalName, out.blob);
     }
     const zipBlob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(zipBlob);
@@ -563,6 +585,70 @@ function handleFiles(files){
   });
 }
 
+// Mode BEBAS: konversi PDF -> PNG murni, satu halaman satu file, tanpa
+// modifikasi apapun selain skala resolusi. Orientasi & rasio tiap halaman
+// dipertahankan persis seperti PDF aslinya (landscape tetap landscape, dst).
+async function processEntryBebas(entry, pdf, dpi){
+  // Bersihkan hasil sebelumnya (kalau ini reprocess: ganti resolusi, dsb).
+  if (entry.pages){
+    entry.pages.forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
+  }
+
+  // Cek ukuran tiap halaman dulu (dalam pt), supaya DPI bisa otomatis
+  // diturunkan kalau ada halaman jauh lebih besar dari A4 (misal gambar
+  // teknis/denah ukuran A2/A1) — mencegah crash kanvas di browser.
+  const pageSizes = [];
+  for (let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    pageSizes.push({ w: page.view[2] - page.view[0], h: page.view[3] - page.view[1] });
+  }
+  const effectiveDpi = computeSafeDpi(pageSizes, dpi);
+  const dpiNote = Math.round(effectiveDpi) < dpi ? ` (diturunkan dari ${dpi}, halaman besar)` : '';
+
+  const baseName = entry.file.name.replace(/\.pdf$/i, '');
+  const multi = pdf.numPages > 1;
+  const pages = [];
+
+  for (let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: effectiveDpi / 72 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const outName = multi ? `${baseName}_hal${i}.png` : `${baseName}.png`;
+    pages.push({
+      pageNum: i,
+      blob,
+      sizeBytes: blob.size,
+      width: canvas.width,
+      height: canvas.height,
+      url: URL.createObjectURL(blob),
+      outName
+    });
+  }
+
+  entry.pages = pages;
+  entry.blob = null; // tidak dipakai di mode ini, biar tidak ganda dihitung
+  entry.sizeBytes = pages.reduce((s, p) => s + p.sizeBytes, 0);
+  entry.failed = false;
+
+  entry.thumbEl.src = pages[0].url;
+  entry.thumbEl.style.visibility = 'visible';
+
+  const dpiLabel = Math.round(effectiveDpi) + ' DPI' + dpiNote;
+  entry.statusEl.innerHTML = pages.map(p => `
+    <div class="page-output-row">
+      <a class="btn small" href="${p.url}" download="${escapeAttr(p.outName)}">${multi ? 'Hal ' + p.pageNum : 'Unduh PNG'}</a>
+      <span class="item-dpi-tag">${dpiLabel} · ${p.width}×${p.height}px · ${formatBytes(p.sizeBytes)}</span>
+    </div>
+  `).join('');
+
+  updateSummary();
+}
+
 async function processEntry(entry, dpi){
   entry.statusEl.classList.remove('error');
   entry.statusEl.textContent = 'memproses…';
@@ -570,25 +656,18 @@ async function processEntry(entry, dpi){
   try {
     const buf = await entry.file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const ratioMode = ratioSelect.value; // 'a4' atau 'bebas'
+    const ratioMode = ratioSelect.value; // 'a4', 'a4-nofoto', atau 'bebas'
+
+    // Mode BEBAS = konversi murni PDF -> PNG, tanpa digabung, tanpa dipotong
+    // spasi kosongnya, tanpa dipaksa ke rasio A4. Tiap halaman PDF jadi satu
+    // file PNG terpisah, ukuran & orientasinya persis seperti halaman aslinya.
+    if (ratioMode === 'bebas'){
+      await processEntryBebas(entry, pdf, dpi);
+      return;
+    }
 
     let effectiveDpi = dpi;
     let dpiNote = '';
-
-    if (ratioMode === 'bebas'){
-      // Cek dulu ukuran halaman (dalam pt) sebelum render, supaya bisa
-      // menurunkan DPI otomatis kalau halamannya jauh lebih besar dari A4
-      // (misal gambar teknis/denah ukuran A2/A1) — mencegah crash kanvas.
-      const pageSizes = [];
-      for (let i = 1; i <= pdf.numPages; i++){
-        const page = await pdf.getPage(i);
-        pageSizes.push({ w: page.view[2] - page.view[0], h: page.view[3] - page.view[1] });
-      }
-      effectiveDpi = computeSafeDpi(pageSizes, dpi);
-      if (Math.round(effectiveDpi) < dpi){
-        dpiNote = ` (diturunkan dari ${dpi}, halaman besar)`;
-      }
-    }
 
     const { w: A4_W, h: A4_H } = getA4Size(effectiveDpi);
 
@@ -634,6 +713,10 @@ async function processEntry(entry, dpi){
     const blob = await new Promise(res => finalCanvas.toBlob(res, 'image/png'));
 
     if (entry.url) URL.revokeObjectURL(entry.url);
+    if (entry.pages){
+      entry.pages.forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
+      entry.pages = null;
+    }
     entry.url = URL.createObjectURL(blob);
     entry.blob = blob;
     entry.sizeBytes = blob.size;
@@ -652,6 +735,10 @@ async function processEntry(entry, dpi){
   } catch (err){
     console.error(err);
     entry.blob = null;
+    if (entry.pages){
+      entry.pages.forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
+      entry.pages = null;
+    }
     entry.sizeBytes = 0;
     entry.failed = true;
     entry.statusEl.innerHTML = '';
