@@ -97,10 +97,12 @@
   .item-status{ color:var(--ink-soft); font-size:11px; white-space:nowrap; display:flex; align-items:center; gap:8px; }
   .item-status.error{ color:var(--stamp-ink); }
   .item-dpi-tag{ color:var(--ok); font-size:10px; }
+  .page-outputs-list{
+    display:flex; flex-direction:column; gap:6px; width:100%;
+  }
   .page-output-row{
     display:flex; align-items:center; gap:8px; flex-wrap:wrap;
   }
-  .page-output-row + .page-output-row{ margin-top:6px; }
   .item-thumb{
     width:28px; height:36px; object-fit:cover;
     border:1px solid var(--line); background:#fff; flex-shrink:0;
@@ -639,12 +641,12 @@ async function processEntryBebas(entry, pdf, dpi){
   entry.thumbEl.style.visibility = 'visible';
 
   const dpiLabel = Math.round(effectiveDpi) + ' DPI' + dpiNote;
-  entry.statusEl.innerHTML = pages.map(p => `
+  entry.statusEl.innerHTML = `<div class="page-outputs-list">${pages.map(p => `
     <div class="page-output-row">
       <a class="btn small" href="${p.url}" download="${escapeAttr(p.outName)}">${multi ? 'Hal ' + p.pageNum : 'Unduh PNG'}</a>
       <span class="item-dpi-tag">${dpiLabel} · ${p.width}×${p.height}px · ${formatBytes(p.sizeBytes)}</span>
     </div>
-  `).join('');
+  `).join('')}</div>`;
 
   updateSummary();
 }
